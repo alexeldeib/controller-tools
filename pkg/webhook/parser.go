@@ -125,6 +125,12 @@ type Config struct {
 
 	// MatchExpressions is an array of the form {key.operator.value1;value2;value3, key2.operator2.value2}
 	MatchExpressions []string `marker:"matchExpressions,optional"`
+
+	// WebhookServiceName is the name of the webhook service in the client config
+	WebhookServiceName string `marker:"webhookServiceName,optional"`
+
+	// WebhookServiceNamespace is the namespace of the webhook service in the client config
+	WebhookServiceNamespace string `marker:"webhookServiceNamespace,optional"`
 }
 
 // verbToAPIVariant converts a marker's verb to the proper value for the API.
@@ -262,10 +268,18 @@ func (c Config) matchPolicy() (*admissionregv1.MatchPolicyType, error) {
 // clientConfig returns the client config for a webhook.
 func (c Config) clientConfig() admissionregv1.WebhookClientConfig {
 	path := c.Path
+	name := c.WebhookServiceNamespace
+	namespace := c.WebhookServiceNamespace
+	if name == "" {
+		name = "webhook-service"
+	}
+	if namespace == "" {
+		namespace = "system"
+	}
 	return admissionregv1.WebhookClientConfig{
 		Service: &admissionregv1.ServiceReference{
-			Name:      "webhook-service",
-			Namespace: "system",
+			Name:      name,
+			Namespace: namespace,
 			Path:      &path,
 		},
 	}
