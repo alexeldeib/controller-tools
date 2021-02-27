@@ -47,6 +47,20 @@ webhooks:
   failurePolicy: Fail
   matchPolicy: Equivalent
   name: validation.cronjob.testdata.kubebuilder.io
+  namespaceSelector:
+    matchExpressions:
+    - key: key
+      operator: In
+      values:
+      - foo
+      - bar
+      - baz
+    - key: otherKey
+      operator: Exists
+    - key: anotherKey
+      operator: NotIn
+      values:
+      - foobar
   rules:
   - apiGroups:
     - testdata.kubebuiler.io

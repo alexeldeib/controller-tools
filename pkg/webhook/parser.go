@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -112,6 +113,18 @@ type Config struct {
 	// For generating v1 {Mutating,Validating}WebhookConfiguration, this is mandatory.
 	// For generating v1beta1 {Mutating,Validating}WebhookConfiguration, this is optional, and default to v1beta1.
 	AdmissionReviewVersions []string `marker:"admissionReviewVersions,optional"`
+
+	// MatchLabels decides whether to run the webhook on an object based
+	// on whether the namespace for that object matches the selector. If the
+	// object itself is a namespace, the matching is performed on
+	// object.metadata.labels. If the object is another cluster scoped resource,
+	// it never skips the webhook. It is either a series of key-value pairs separated by semicolons, e.g.
+	// `{key=value, key=value}`, or a string of form `key.operator.{}`, where operator
+	// can be "In", "NotIn", "Exists", or "NotExists"
+	MatchLabels []string `marker:"matchLabels,optional"`
+
+	// MatchExpressions is an array of the form {key.operator.value1;value2;value3, key2.operator2.value2}
+	MatchExpressions []string `marker:"matchExpressions,optional"`
 }
 
 // verbToAPIVariant converts a marker's verb to the proper value for the API.
@@ -144,6 +157,11 @@ func (c Config) ToMutatingWebhook() (admissionregv1.MutatingWebhook, error) {
 		return admissionregv1.MutatingWebhook{}, err
 	}
 
+	namespaceSelector, err := c.namespaceSelector()
+	if err != nil {
+		return admissionregv1.MutatingWebhook{}, err
+	}
+
 	return admissionregv1.MutatingWebhook{
 		Name:                    c.Name,
 		Rules:                   c.rules(),
@@ -152,6 +170,7 @@ func (c Config) ToMutatingWebhook() (admissionregv1.MutatingWebhook, error) {
 		ClientConfig:            c.clientConfig(),
 		SideEffects:             c.sideEffects(),
 		AdmissionReviewVersions: c.AdmissionReviewVersions,
+		NamespaceSelector:       namespaceSelector,
 	}, nil
 }
 
@@ -166,6 +185,11 @@ func (c Config) ToValidatingWebhook() (admissionregv1.ValidatingWebhook, error) 
 		return admissionregv1.ValidatingWebhook{}, err
 	}
 
+	namespaceSelector, err := c.namespaceSelector()
+	if err != nil {
+		return admissionregv1.ValidatingWebhook{}, err
+	}
+
 	return admissionregv1.ValidatingWebhook{
 		Name:                    c.Name,
 		Rules:                   c.rules(),
@@ -174,6 +198,7 @@ func (c Config) ToValidatingWebhook() (admissionregv1.ValidatingWebhook, error) 
 		ClientConfig:            c.clientConfig(),
 		SideEffects:             c.sideEffects(),
 		AdmissionReviewVersions: c.AdmissionReviewVersions,
+		NamespaceSelector:       namespaceSelector,
 	}, nil
 }
 
@@ -277,6 +302,72 @@ func (c Config) webhookVersions() ([]string, error) {
 		}
 	}
 	return sets.NewString(c.WebhookVersions...).UnsortedList(), nil
+}
+
+// namespaceSelector returns the namespace selector of the webhook.
+func (c Config) namespaceSelector() (*metav1.LabelSelector, error) {
+	if len(c.MatchLabels) == 0 && len(c.MatchExpressions) == 0 {
+		return nil, nil
+	}
+
+	var selector metav1.LabelSelector
+	if len(c.MatchLabels) > 0 {
+		matchLabels := map[string]string{}
+		for i := range c.MatchLabels {
+			keyValuePair := c.MatchLabels[i]
+			tokens := strings.Split(keyValuePair, "=")
+			if len(tokens) != 2 {
+				return nil, fmt.Errorf("matchLabels element must be in form `key1=value1`, got string: `%s`", keyValuePair)
+			}
+			matchLabels[tokens[0]] = tokens[1]
+		}
+		selector.MatchLabels = matchLabels
+	}
+
+	if len(c.MatchExpressions) > 0 {
+		var matchExpressions []metav1.LabelSelectorRequirement
+		for i := range c.MatchExpressions {
+			str := c.MatchExpressions[i]
+			// split from key.operator.value1;value2 into [key, operator, value1;value2]
+			tokens := strings.Split(str, ".")
+			if len(tokens) < 2 || len(tokens) > 3 {
+				return nil, fmt.Errorf("matchExpressions element must be in the form `key.operator.value1;value2;value3` for comparison or `key.operator` for existence, received: '%s'", str)
+			}
+			key, operator := tokens[0], tokens[1]
+			found := false
+			for _, known := range knownLabelSelectors {
+				if operator == string(known) {
+					found = true
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("found invalid labelRequirementOperator '%s'", operator)
+			}
+			var values []string
+			if len(tokens) == 3 {
+				if operator == string(metav1.LabelSelectorOpDoesNotExist) || operator == string(metav1.LabelSelectorOpExists) {
+					return nil, fmt.Errorf("operators Exists and NotExists must be of form `key.operator`, received: '%s'", str)
+				}
+				values = strings.Split(tokens[2], "-")
+			}
+			requirement := metav1.LabelSelectorRequirement{
+				Key:      key,
+				Operator: metav1.LabelSelectorOperator(operator),
+				Values:   values,
+			}
+			matchExpressions = append(matchExpressions, requirement)
+		}
+		selector.MatchExpressions = matchExpressions
+	}
+
+	return &selector, nil
+}
+
+var knownLabelSelectors = []metav1.LabelSelectorOperator{
+	metav1.LabelSelectorOpIn,
+	metav1.LabelSelectorOpNotIn,
+	metav1.LabelSelectorOpExists,
+	metav1.LabelSelectorOpDoesNotExist,
 }
 
 // +controllertools:marker:generateHelp

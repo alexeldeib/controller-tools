@@ -80,6 +80,14 @@ func (Config) Help() *markers.DefinitionHelp {
 				Summary: "is an ordered list of preferred `AdmissionReview` versions the Webhook expects. For generating v1 {Mutating,Validating}WebhookConfiguration, this is mandatory. For generating v1beta1 {Mutating,Validating}WebhookConfiguration, this is optional, and default to v1beta1.",
 				Details: "",
 			},
+			"MatchLabels": markers.DetailedHelp{
+				Summary: "decides whether to run the webhook on an object based on whether the namespace for that object matches the selector. If the object itself is a namespace, the matching is performed on object.metadata.labels. If the object is another cluster scoped resource, it never skips the webhook. It is either a series of key-value pairs separated by semicolons, e.g. `{key=value, key=value}`, or a string of form `key.operator.{}`, where operator can be \"In\", \"NotIn\", \"Exists\", or \"NotExists\"",
+				Details: "",
+			},
+			"MatchExpressions": markers.DetailedHelp{
+				Summary: "is an array of the form {key.operator.value1;value2;value3, key2.operator2.value2}",
+				Details: "",
+			},
 		},
 	}
 }
